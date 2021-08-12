@@ -1,23 +1,24 @@
 import asyncio
 import re
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
-import subprocess
 
 import bs4
 import requests
 from aiohttp import ClientSession
-from discord import Embed, Message, File
+from discord import Embed, File, Message
 from discord.ext.commands import Bot
 
 GSNET_URL_PATTERN = re.compile(r"http://10\.\d{,3}\.\d{,3}\.\d{,3}[-\w./()?%&=!~#]*")
+BOT_HEDERS = {"User-Agent": "6ZeH44Gu5omL44GM5p2l44Gf44KI44CcCg=="}
 
 
 def save_file(url: str, file_path: Path) -> None:
-    response = requests.get(url)
+    response = requests.get(url, headers=BOT_HEDERS)
     response.raise_for_status()
     with open(file_path, "wb") as f:
         f.write(response.content)
@@ -95,7 +96,7 @@ def get_gsnet_urls(string: str) -> list[str]:
 
 
 async def get_page(url: str) -> Optional[Page]:
-    async with ClientSession() as session:
+    async with ClientSession(headers=BOT_HEDERS) as session:
         try:
             async with session.get(url) as response:
                 if response.status != 200:
