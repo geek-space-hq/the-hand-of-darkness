@@ -1,16 +1,16 @@
 import asyncio
 import re
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
-import subprocess
 
 import bs4
 import requests
 from aiohttp import ClientSession
-from discord import Embed, Message, File
+from discord import Embed, File, Message
 from discord.ext.commands import Bot
 
 GSNET_URL_PATTERN = re.compile(r"http://10\.\d{,3}\.\d{,3}\.\d{,3}[-\w./()?%&=!~#]*")
