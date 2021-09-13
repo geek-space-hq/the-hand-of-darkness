@@ -38,7 +38,7 @@ def get_png_favicon_file(favicon_url: str, directory: Path) -> File:
 
 
 def get_ogp_file(image_url: str, directory: Path) -> File:
-    file_name = image_url.split("/")[-1].split("?")[0]
+    file_name = Path(urlparse(image_url).path).name
     file_path = Path(directory) / file_name
     save_file(image_url, file_path)
     return File(file_path, filename=file_name)
