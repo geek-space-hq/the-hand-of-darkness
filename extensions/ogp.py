@@ -76,7 +76,7 @@ class Page:
         elif title_tag := soup.select_one("title"):
             title = title_tag.text
         else:
-            title = self.url[8:]  # https:// を消す
+            title = self.url[7:]  # http:// を消す
 
         if description_tag := soup.select_one(r"meta[property=og\:description]"):
             description = description_tag["content"]
