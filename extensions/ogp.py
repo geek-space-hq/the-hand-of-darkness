@@ -14,6 +14,7 @@ from discord import Embed, File, Message
 from discord.ext.commands import Bot
 
 GSNET_URL_PATTERN = re.compile(r"http://10\.\d{,3}\.\d{,3}\.\d{,3}[-\w./()?%&=!~#]*")
+GITEA_HOST = "10.77.0.20"
 BOT_HEDERS = {"User-Agent": "6ZeH44Gu5omL44GM5p2l44Gf44KI44CcCg=="}
 
 
@@ -108,6 +109,9 @@ async def get_page(url: str) -> Optional[Page]:
 
 async def on_message(message: Message) -> None:
     if len(gsnet_urls := get_gsnet_urls(message.content)) == 0:
+        return
+    gsnet_urls = [url for url in gsnet_urls if urlparse(url).hostname != GITEA_HOST]
+    if not gsnet_urls:
         return
     all_pages = await asyncio.gather(*[get_page(url) for url in gsnet_urls])
     found_pages = filter(None, all_pages)

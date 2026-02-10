@@ -3,7 +3,7 @@ import os
 from discord.ext.commands import Bot, when_mentioned
 
 
-BOT_EXTENSIONS = ["ogp"]
+BOT_EXTENSIONS = ["ogp", "gitea"]
 
 
 class MyBot(Bot):
