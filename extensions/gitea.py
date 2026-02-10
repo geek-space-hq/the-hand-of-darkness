@@ -1,14 +1,15 @@
 import os
 import re
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, auto
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from aiohttp import ClientSession
-from discord import Color, Embed, Message
+from discord import Color, Embed, File, Message
 from discord.ext.commands import Bot
 
 GITEA_HOST = "10.77.0.20"
@@ -41,6 +42,12 @@ class GiteaResource:
     number: Optional[int] = None
     sha: Optional[str] = None
     url: str = ""
+
+
+@dataclass
+class EmbedResult:
+    embed: Embed
+    avatar_url: Optional[str] = None
 
 
 def parse_gitea_url(url: str) -> GiteaResource:
@@ -150,7 +157,21 @@ class GiteaClient:
         return await self._get(f"/users/{username}")
 
 
-def _build_repo_embed(data: Dict[str, Any], url: str) -> Embed:
+async def _download_avatar(avatar_url: str, directory: Path) -> Optional[File]:
+    try:
+        async with ClientSession() as session:
+            async with session.get(avatar_url) as response:
+                if response.status != 200:
+                    return None
+                avatar_data = await response.read()
+                avatar_path = directory / "avatar.png"
+                avatar_path.write_bytes(avatar_data)
+                return File(avatar_path, filename="avatar.png")
+    except Exception:
+        return None
+
+
+def _build_repo_embed(data: Dict[str, Any], url: str) -> EmbedResult:
     full_name = data.get("full_name", "")
     description = data.get("description", "") or ""
     embed = Embed(title=full_name, url=url, description=description, color=COLOR_GITEA)
@@ -164,16 +185,15 @@ def _build_repo_embed(data: Dict[str, Any], url: str) -> Embed:
     language = data.get("language", "")
     if language:
         embed.add_field(name="Language", value=language, inline=True)
+    avatar_url: Optional[str] = None
     owner_data = data.get("owner", {})
     if owner_data:
-        embed.set_author(
-            name=owner_data.get("login", ""),
-            icon_url=owner_data.get("avatar_url", ""),
-        )
+        embed.set_author(name=owner_data.get("login", ""))
+        avatar_url = owner_data.get("avatar_url") or None
     embed.set_footer(text=full_name)
     if data.get("created_at"):
         embed.timestamp = _parse_datetime(data["created_at"])
-    return embed
+    return EmbedResult(embed=embed, avatar_url=avatar_url)
 
 
 def _state_emoji(state: str) -> str:
@@ -184,7 +204,7 @@ def _state_emoji(state: str) -> str:
     return ""
 
 
-def _build_issue_embed(data: Dict[str, Any], resource: GiteaResource) -> Embed:
+def _build_issue_embed(data: Dict[str, Any], resource: GiteaResource) -> EmbedResult:
     state = data.get("state", "open")
     color = COLOR_ISSUE_OPEN if state == "open" else COLOR_ISSUE_CLOSED
     title = f"#{data.get('number', '')} {data.get('title', '')}"
@@ -205,15 +225,15 @@ def _build_issue_embed(data: Dict[str, Any], resource: GiteaResource) -> Embed:
         name="Comments", value=str(data.get("comments", 0)), inline=True
     )
 
+    avatar_url: Optional[str] = None
     user = data.get("user", {})
     if user:
-        embed.set_author(
-            name=user.get("login", ""), icon_url=user.get("avatar_url", "")
-        )
+        embed.set_author(name=user.get("login", ""))
+        avatar_url = user.get("avatar_url") or None
     embed.set_footer(text=f"{resource.owner}/{resource.repo}")
     if data.get("created_at"):
         embed.timestamp = _parse_datetime(data["created_at"])
-    return embed
+    return EmbedResult(embed=embed, avatar_url=avatar_url)
 
 
 def _pr_state_label(data: Dict[str, Any]) -> str:
@@ -231,7 +251,7 @@ def _pr_color(data: Dict[str, Any]) -> Color:
     return COLOR_ISSUE_CLOSED
 
 
-def _build_pull_embed(data: Dict[str, Any], resource: GiteaResource) -> Embed:
+def _build_pull_embed(data: Dict[str, Any], resource: GiteaResource) -> EmbedResult:
     state_label = _pr_state_label(data)
     color = _pr_color(data)
     title = f"#{data.get('number', '')} {data.get('title', '')}"
@@ -250,18 +270,18 @@ def _build_pull_embed(data: Dict[str, Any], resource: GiteaResource) -> Embed:
         label_names = ", ".join(lb.get("name", "") for lb in labels)
         embed.add_field(name="Labels", value=label_names, inline=True)
 
+    avatar_url: Optional[str] = None
     user = data.get("user", {})
     if user:
-        embed.set_author(
-            name=user.get("login", ""), icon_url=user.get("avatar_url", "")
-        )
+        embed.set_author(name=user.get("login", ""))
+        avatar_url = user.get("avatar_url") or None
     embed.set_footer(text=f"{resource.owner}/{resource.repo}")
     if data.get("created_at"):
         embed.timestamp = _parse_datetime(data["created_at"])
-    return embed
+    return EmbedResult(embed=embed, avatar_url=avatar_url)
 
 
-def _build_commit_embed(data: Dict[str, Any], resource: GiteaResource) -> Embed:
+def _build_commit_embed(data: Dict[str, Any], resource: GiteaResource) -> EmbedResult:
     sha = data.get("sha", "") or ""
     short_sha = sha[:7]
     commit_info = data.get("commit", {}) or {}
@@ -275,28 +295,31 @@ def _build_commit_embed(data: Dict[str, Any], resource: GiteaResource) -> Embed:
         title=title, url=resource.url, description=rest[:200], color=COLOR_COMMIT
     )
 
+    avatar_url: Optional[str] = None
     author_info = commit_info.get("author", {}) or {}
     committer_name = author_info.get("name", "")
     if committer_name:
         embed.set_author(name=committer_name)
 
+    api_author = data.get("author")
+    if api_author:
+        avatar_url = api_author.get("avatar_url") or None
+
     embed.set_footer(text=f"{resource.owner}/{resource.repo}")
     if author_info.get("date"):
         embed.timestamp = _parse_datetime(author_info["date"])
-    return embed
+    return EmbedResult(embed=embed, avatar_url=avatar_url)
 
 
-def _build_user_embed(data: Dict[str, Any], url: str) -> Embed:
+def _build_user_embed(data: Dict[str, Any], url: str) -> EmbedResult:
     login = data.get("login", "")
     bio = data.get("description", "") or data.get("bio", "") or ""
     embed = Embed(title=login, url=url, description=bio, color=COLOR_USER)
-    avatar = data.get("avatar_url", "")
-    if avatar:
-        embed.set_thumbnail(url=avatar)
+    avatar_url = data.get("avatar_url") or None
     embed.set_footer(text="Gitea")
     if data.get("created"):
         embed.timestamp = _parse_datetime(data["created"])
-    return embed
+    return EmbedResult(embed=embed, avatar_url=avatar_url)
 
 
 async def on_message(message: Message) -> None:
@@ -316,14 +339,14 @@ async def on_message(message: Message) -> None:
         if resource.resource_type == GiteaResourceType.UNKNOWN:
             continue
 
-        embed: Optional[Embed] = None
+        result: Optional[EmbedResult] = None
 
         try:
             if resource.resource_type == GiteaResourceType.REPO:
                 assert resource.repo is not None
                 data = await client.get_repo(resource.owner, resource.repo)
                 if data:
-                    embed = _build_repo_embed(data, url)
+                    result = _build_repo_embed(data, url)
 
             elif resource.resource_type == GiteaResourceType.ISSUE:
                 assert resource.repo is not None
@@ -332,7 +355,7 @@ async def on_message(message: Message) -> None:
                     resource.owner, resource.repo, resource.number
                 )
                 if data:
-                    embed = _build_issue_embed(data, resource)
+                    result = _build_issue_embed(data, resource)
 
             elif resource.resource_type == GiteaResourceType.PULL_REQUEST:
                 assert resource.repo is not None
@@ -341,7 +364,7 @@ async def on_message(message: Message) -> None:
                     resource.owner, resource.repo, resource.number
                 )
                 if data:
-                    embed = _build_pull_embed(data, resource)
+                    result = _build_pull_embed(data, resource)
 
             elif resource.resource_type == GiteaResourceType.COMMIT:
                 assert resource.repo is not None
@@ -350,18 +373,36 @@ async def on_message(message: Message) -> None:
                     resource.owner, resource.repo, resource.sha
                 )
                 if data:
-                    embed = _build_commit_embed(data, resource)
+                    result = _build_commit_embed(data, resource)
 
             elif resource.resource_type == GiteaResourceType.USER:
                 data = await client.get_user(resource.owner)
                 if data:
-                    embed = _build_user_embed(data, url)
+                    result = _build_user_embed(data, url)
 
         except Exception:
             continue
 
-        if embed is not None:
-            await message.channel.send(embed=embed)
+        if result is not None:
+            file: Optional[File] = None
+            temp_dir = None
+            try:
+                if result.avatar_url:
+                    temp_dir = tempfile.TemporaryDirectory()
+                    file = await _download_avatar(
+                        result.avatar_url, Path(temp_dir.name)
+                    )
+                    if file is not None:
+                        result.embed.set_thumbnail(url="attachment://avatar.png")
+                        if result.embed.author.name:
+                            result.embed.set_author(
+                                name=result.embed.author.name,
+                                icon_url="attachment://avatar.png",
+                            )
+                await message.channel.send(embed=result.embed, file=file)
+            finally:
+                if temp_dir is not None:
+                    temp_dir.cleanup()
 
 
 async def setup(bot: Bot) -> None:
