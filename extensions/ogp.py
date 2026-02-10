@@ -140,5 +140,5 @@ async def on_message(message: Message) -> None:
         temp_dir.cleanup()
 
 
-def setup(bot: Bot):
+async def setup(bot: Bot) -> None:
     bot.add_listener(on_message)

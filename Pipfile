@@ -4,7 +4,7 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-"discord.py" = {ref = "feature/threads", git = "https://github.com/Rapptz/discord.py.git"}
+"discord.py" = ">=2.0"
 bs4 = "*"
 lxml = "*"
 requests = "*"
